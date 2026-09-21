@@ -87,33 +87,49 @@ def fig_accuracy_trap(A):
     _save(fig, "fig2_accuracy_trap.pdf")
 
 
+PM_EST = "penman-monteith, estimated Rs"
+HG_EST = "hargreaves calibrated"
+
+
 def fig_timing(O):
-    """Event agreement against tolerance, and the distribution of signed timing offsets."""
+    """Event agreement against tolerance, and the distribution of signed timing offsets.
+
+    Solid: Penman-Monteith with radiation from the temperature range. Dashed and
+    outlined: calibrated Hargreaves, for comparison.
+    """
     fig, ax = plt.subplots(1, 2, figsize=(6.6, 2.4))
-    tol = [e["tol"] for e in O["events"]["tol"]]
-    f1 = [e["f1"] for e in O["events"]["tol"]]
-    rec = [e["recall"] for e in O["events"]["tol"]]
-    ax[0].plot(tol, f1, marker="o", ms=3.5, color=NAVY, label="F1")
-    ax[0].plot(tol, rec, marker="s", ms=3.5, color=GOLD, ls="--", label="recall")
+    pm, hg = O["events_by_estimate"][PM_EST], O["events_by_estimate"][HG_EST]
+    tol = [e["tol"] for e in pm["tol"]]
+    f1 = [e["f1"] for e in pm["tol"]]
+    rec = [e["recall"] for e in pm["tol"]]
+    ax[0].plot(tol, f1, marker="o", ms=3.5, color=NAVY, label="F1, Penman-Monteith")
+    ax[0].plot(tol, rec, marker="s", ms=3.5, color=GOLD, ls="--",
+               label="recall, Penman-Monteith")
+    ax[0].plot(tol, [e["f1"] for e in hg["tol"]], marker="o", ms=2.8, color=SLATE,
+               ls=":", label="F1, Hargreaves calibrated")
     ax[0].scatter([0], [f1[0]], s=42, facecolor="white", edgecolor=RED, zorder=5,
                   lw=1.2)
-    ax[0].annotate("what a per-day\nscore reports", (0, f1[0]), (2.1, 0.16),
+    ax[0].annotate("what a per-day\nscore reports", (0, f1[0]), (0.9, 0.04),
                    fontsize=6.6, color=RED,
                    arrowprops=dict(arrowstyle="->", color=RED, lw=0.8))
     ax[0].set_xlabel("tolerance (days)"); ax[0].set_ylabel("agreement")
-    ax[0].set_ylim(0, 1.05); ax[0].legend(frameon=False, loc="lower right")
+    ax[0].set_ylim(0, 1.05)
+    ax[0].legend(frameon=False, loc="lower right", fontsize=6.2)
     ax[0].set_title("scheduling the same irrigations")
 
-    off = np.array(O["events"]["offsets"])
     bins = np.arange(-14.5, 15.5, 1.0)
-    ax[1].hist(off, bins=bins, color=NAVY, edgecolor="none")
+    ax[1].hist(np.array(pm["offsets"]), bins=bins, color=NAVY, edgecolor="none",
+               label="Penman-Monteith")
+    ax[1].hist(np.array(hg["offsets"]), bins=bins, histtype="step", color=GOLD, lw=1.0,
+               label="Hargreaves calibrated")
     ax[1].axvline(0, color=RED, lw=1.0, ls=":")
     ax[1].set_xlabel("days, reference event to nearest prediction")
     ax[1].set_ylabel("events")
     ax[1].set_xlim(-14, 14)
     ax[1].set_title("and how late it is")
-    w3 = O["events"]["within_3_days"]
-    ax[1].text(0.97, 0.92, f"{100 * w3:.0f}% within 3 days", transform=ax[1].transAxes,
+    ax[1].legend(frameon=False, loc="upper left", fontsize=6.2, handlelength=1.2)
+    w3 = pm["within_3_days"]
+    ax[1].text(0.97, 0.62, f"{100 * w3:.0f}% within 3 days", transform=ax[1].transAxes,
                ha="right", fontsize=6.8, color=SLATE)
     fig.tight_layout(w_pad=1.4)
     _save(fig, "fig3_timing.pdf")

@@ -1,11 +1,14 @@
 """The reference recursion as the node would run it, and how to score it.
 
-Three pieces: a temperature-only estimate of evaporative demand, the water-balance
-recursion driven by what the node has, and a scoring rule for events rather than days.
+Three pieces: two estimates of evaporative demand from what the node senses, the
+water-balance recursion driven by what the node has, and a scoring rule for events
+rather than days.
 """
 import numpy as np
 import reference as R
-from eto import extraterrestrial
+from eto import extraterrestrial, eto_pm
+
+KRS_INTERIOR = 0.16   # FAO-56 eq. 50 coefficient for interior locations (0.19 coastal)
 
 
 def eto_hargreaves(tmax, tmin, doy, lat_deg):
@@ -20,6 +23,51 @@ def eto_hargreaves(tmax, tmin, doy, lat_deg):
     Ra = extraterrestrial(doy, lat_deg)
     tmean = (tmax + tmin) / 2.0
     return 0.0023 * 0.408 * Ra * (tmean + 17.8) * np.sqrt(np.maximum(tmax - tmin, 0))
+
+
+def elevation_from_pressure(P):
+    """Site elevation in metres from surface pressure in kPa, FAO-56 eq. 7 inverted."""
+    return (293.0 - 293.0 * (np.asarray(P, float) / 101.3) ** (1.0 / 5.26)) / 0.0065
+
+
+def rs_from_temperature_range(tmax, tmin, doy, lat_deg, z, krs=KRS_INTERIOR):
+    """FAO-56 eq. 50: solar radiation from the daily temperature range.
+
+    Rs = krs * sqrt(Tmax - Tmin) * Ra, in MJ per square metre per day, limited to
+    the clear-sky radiation of eq. 37 as FAO-56 prescribes. FAO-56 gives krs of
+    about 0.16 for interior and 0.19 for coastal locations.
+    """
+    Ra = extraterrestrial(doy, lat_deg)
+    rs = krs * np.sqrt(np.maximum(np.asarray(tmax) - np.asarray(tmin), 0.0)) * Ra
+    return np.minimum(rs, (0.75 + 2e-5 * np.asarray(z)) * Ra)
+
+
+def eto_pm_node(tmax, tmin, rh, u2, P, doy, lat_deg, krs=KRS_INTERIOR):
+    """FAO-56 Penman-Monteith with the one input the node lacks estimated.
+
+    Solar radiation comes from the temperature range by eq. 50, which is the route
+    FAO-56 (chapter 3, missing data) recommends over a temperature-only ETo
+    equation. Humidity, wind and pressure are the node's own readings, and the
+    elevation that the clear-sky radiation needs is recovered from pressure by
+    eq. 7, so nothing beyond the sensors, the date and the latitude is used.
+    """
+    z = elevation_from_pressure(P)
+    rs = rs_from_temperature_range(tmax, tmin, doy, lat_deg, z, krs)
+    return eto_pm(tmax, tmin, rh, u2, rs, P, doy, lat_deg, z)
+
+
+def calibrate_krs(eto_ref, tmax, tmin, rh, u2, P, doy, lat_deg, lo=0.08, hi=0.30):
+    """The krs at which mean node Penman-Monteith ETo equals the mean of eto_ref.
+
+    The same criterion as the Hargreaves calibration: match the mean reference ETo
+    over the calibration days. Mean ETo rises with krs, so bisection suffices.
+    """
+    target = float(np.mean(eto_ref))
+    f = lambda k: float(np.mean(eto_pm_node(tmax, tmin, rh, u2, P, doy, lat_deg, k))) - target
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if f(mid) < 0 else (lo, mid)
+    return 0.5 * (lo + hi)
 
 
 def onboard_decision(eto, rain, dap):

@@ -99,6 +99,27 @@ cmd("SeasonDays", O["season_days"])
 cmd("SeasonBias", f"{O['eto_bias_mm_per_day'] * O['season_days']:.0f}")
 cmd("RawMm", f"{O['raw_mm']:.0f}"); cmd("TawMm", f"{O['taw_mm']:.0f}")
 
+# node-side ETo estimates: Hargreaves (Hg), Penman-Monteith with radiation from
+# the temperature range (Pm), the same with k_Rs calibrated (PmCal), and
+# Hargreaves rescaled to the Penman-Monteith mean (Hp)
+EST = {"Hg": "hargreaves", "HgCal": "hargreaves calibrated",
+       "Pm": "penman-monteith, estimated Rs", "PmCal": "penman-monteith, calibrated k_Rs",
+       "Hp": "hargreaves, rescaled to penman-monteith mean"}
+sg2 = lambda x: sg(x, 2)
+cmd("Krs", f"{O['krs']:.2f}"); cmd("KrsCal", f"{O['krs_cal']:.3f}")
+for t, nm in EST.items():
+    ee, ev = O["eto_estimates"][nm], O["events_by_estimate"][nm]
+    f1 = {x["tol"]: x["f1"] for x in ev["tol"]}
+    cmd(f"{t}EtoBias", sg2(ee["bias_mm_per_day"]))
+    cmd(f"{t}EtoRmse", f"{ee['rmse_mm_per_day']:.2f}")
+    cmd(f"{t}OnMcc", sg(v[nm]["mcc"]))
+    cmd(f"{t}EvFoneZero", f"{f1[0]:.3f}")
+    cmd(f"{t}EvFoneThree", f"{f1[3]:.3f}")
+    cmd(f"{t}EvFoneSeven", f"{f1[7]:.3f}")
+    cmd(f"{t}EvMedianOffset", f"{ev['median_offset_days']:.0f}")
+    cmd(f"{t}EvWithinThree", pct(ev["within_3_days"], 0))
+    cmd(f"{t}EvPerSeasonPred", f"{ev['n_pred'] / ev['seasons']:.1f}")
+
 e = O["events"]
 cmd("EvTrue", e["n_true"]); cmd("EvPred", e["n_pred"])
 cmd("EvPerSeasonTrue", f"{e['n_true'] / e['seasons']:.1f}")
@@ -151,6 +172,25 @@ SPREAD_ITEMS = {
     "EvFoneZero": (lambda a, o: o["events"]["tol"][0]["f1"], lambda x: f"{x:.3f}"),
     "EvFoneThree": (lambda a, o: next(t["f1"] for t in o["events"]["tol"] if t["tol"] == 3),
                     lambda x: f"{x:.3f}"),
+    **{f"{t}OnMcc": ((lambda nm: lambda a, o: o["variants"][nm]["mcc"])(nm), sg)
+       for t, nm in EST.items()},
+    **{f"{t}EvFoneThree": ((lambda nm: lambda a, o: next(
+        x["f1"] for x in o["events_by_estimate"][nm]["tol"] if x["tol"] == 3))(nm),
+        lambda x: f"{x:.3f}") for t, nm in EST.items()},
+    **{f"{t}EtoRmse": ((lambda nm: lambda a, o: o["eto_estimates"][nm]["rmse_mm_per_day"])(nm),
+                       lambda x: f"{x:.2f}") for t, nm in EST.items()},
+    **{f"{t}EtoBias": ((lambda nm: lambda a, o: o["eto_estimates"][nm]["bias_mm_per_day"])(nm),
+                       sg2) for t, nm in EST.items()},
+    **{f"{t}EvPerSeasonPred": ((lambda nm: lambda a, o: o["events_by_estimate"][nm]["n_pred"]
+                                / o["events_by_estimate"][nm]["seasons"])(nm),
+                               lambda x: f"{x:.1f}") for t, nm in EST.items()},
+    "PmEvFoneZero": (lambda a, o: o["events_by_estimate"][EST["Pm"]]["tol"][0]["f1"],
+                     lambda x: f"{x:.3f}"),
+    "PmEvMedianOffset": (lambda a, o: o["events_by_estimate"][EST["Pm"]]["median_offset_days"],
+                         lambda x: f"{x:.0f}"),
+    "KrsCal": (lambda a, o: o["krs_cal"], lambda x: f"{x:.3f}"),
+    "EvPerSeasonTrue": (lambda a, o: o["events"]["n_true"] / o["events"]["seasons"],
+                        lambda x: f"{x:.1f}"),
     "FlipMeasAll": (lambda a, o: max(q15(a, h, "meas") for h in TAG), sci),
     "FlipBoundAll": (lambda a, o: max(q15(a, h, "bnd") for h in TAG), sci),
     "FlipFirstBitsMax": (lambda a, o: max(first_flip(a, h) for h in TAG), lambda x: f"{x}"),
@@ -194,6 +234,44 @@ else:
               + (f"by {short:.3f} at the other" if rest == 1
                  else f"by at most {short:.3f} at the other {NUMWORD[rest]}"))
 cmd("FertCalAboveSeeds", clause)
+
+
+
+def seeds_clause(better):
+    """'at every seed', or 'at k of the n seeds', for a list of per-seed booleans."""
+    k = sum(better)
+    if k == len(better):
+        return "at every seed"
+    if k == 0:
+        return "at no seed"
+    return f"at {NUMWORD[k]} of the {NUMWORD[len(better)]} seeds"
+
+
+def f1_at(o, nm, tol=3):
+    return next(x["f1"] for x in o["events_by_estimate"][nm]["tol"] if x["tol"] == tol)
+
+
+# the median event offset of the Penman-Monteith node, as a clause over seeds
+offs = [per_seed[sd][1]["events_by_estimate"][EST["Pm"]]["median_offset_days"] for sd in seeds]
+cmd("PmEvMedianOffsetSeeds", "at every seed" if min(offs) == max(offs)
+    else f"({min(offs):.0f} to {max(offs):.0f} across seeds)")
+
+# Where does one node-side ETo estimate give better decisions than another?
+PAIRS = {"PmOverHgCal": ("Pm", "HgCal"), "PmOverHg": ("Pm", "Hg"),
+         "PmOverHp": ("Pm", "Hp"),
+         "PmOverPmCal": ("Pm", "PmCal"), "PmCalOverHgCal": ("PmCal", "HgCal"),
+         "HpOverHgCal": ("Hp", "HgCal")}
+for name, (x, y_) in PAIRS.items():
+    os_ = [per_seed[sd][1] for sd in seeds]
+    cmd(f"{name}MccSeeds", seeds_clause(
+        [o["variants"][EST[x]]["mcc"] > o["variants"][EST[y_]]["mcc"] for o in os_]))
+    cmd(f"{name}FoneSeeds", seeds_clause(
+        [f1_at(o, EST[x]) > f1_at(o, EST[y_]) for o in os_]))
+
+# against both Hargreaves estimates at once, calibrated or not
+cmd("PmOverHgBothFoneSeeds", seeds_clause(
+    [f1_at(o, EST["Pm"]) > max(f1_at(o, EST["Hg"]), f1_at(o, EST["HgCal"]))
+     for o in (per_seed[sd][1] for sd in seeds)]))
 
 out = os.path.join(RES, "numbers.tex")
 os.makedirs(os.path.dirname(out), exist_ok=True)
