@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "Reckoner: what a low-cost weather node can decide"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - given-names: John Nyamu
+    family-names: "Kibe"
+    affiliation: "Department of Mechatronic Engineering, School of Engineering, Dedan Kimathi University of Technology"
+  - given-names: Morris Kimathi
+    family-names: "Mwangi"
+    affiliation: "Department of Mechatronic Engineering, School of Engineering, Dedan Kimathi University of Technology"
+  - given-names: Samuel Macharia
+    family-names: "Kang'iri"
+    affiliation: "Department of Mechatronic Engineering, School of Engineering, Dedan Kimathi University of Technology"
+    orcid: "https://orcid.org/0000-0002-7326-7502"
+repository-code: "https://github.com/SiliconWit/weather-node-decision-observability"
+license: MIT
+keywords:
+  - edge AI
+  - agricultural decision support
+  - observability
+  - quantization
+  - reproducible research

@@ -1,0 +1,17 @@
+data/*.json
+!data/nyeri_daily.json
+!data/nyeri_wd.json
+data/download/
+.venv/
+__pycache__/
+*.pyc
+paper/
+results/*
+!results/.gitkeep
+/*.json
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/
+.env
